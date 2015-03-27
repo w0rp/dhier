@@ -1,8 +1,6 @@
 /**
  * Example D source file for the hierarchy generator.
  *
- * Ran with the following command:
- *
  * rdmd example.d | dot -Tpng > example.png
  */
 
@@ -20,9 +18,9 @@ class SuperSpecialWidget : SpecialWidget, Special {}
 class NotSoSpecialWidget : Widget {}
 
 void main(string[] argv) {
-    HierarchyInfo hierInfo;
+    ClassHierarchyInfo hierInfo;
 
-    hierInfo.addAbsolutelyEverything;
+    hierInfo.addAbsolutelyEverything();
 
     // Filter out a few standard libraries classes/interfaces.
     hierInfo = hierInfo.filterOut(ctRegex!(
@@ -30,3 +28,4 @@ void main(string[] argv) {
 
     hierInfo.writeDOT(stdout.lockingTextWriter);
 }
+

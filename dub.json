@@ -1,0 +1,18 @@
+{
+    "name": "dhier",
+    "targetType": "library",
+    "description": "D Hierachy Visualisation",
+    "authors": ["w0rp"],
+    "homepage": "https://github.com/w0rp/dhier",
+    "license": "BSD 2-clause",
+    "copyright": "Copyright © 2015, w0rp",
+    "configurations": [
+        {"name": "default"},
+        {
+            "name": "class_example",
+            "targetType": "executable",
+            "targetName": "class_example",
+            "mainSourceFile": "examples/class_hierachy_example.d"
+        },
+    ]
+}
