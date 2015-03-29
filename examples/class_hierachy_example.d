@@ -24,8 +24,8 @@ void main(string[] argv) {
 
     // Filter out a few standard libraries classes/interfaces.
     hierInfo = hierInfo.filterOut(ctRegex!(
-        `(^object\.|^std\.|^core.|^TypeInfo|^gc\.|rt\.)`));
+        `(^object\.|^std\.|^core\.|^TypeInfo|^gc\.|^rt\.)`));
 
-    hierInfo.writeDOT(stdout.lockingTextWriter);
+    hierInfo.writeNamesToDOT(stdout.lockingTextWriter);
 }
 

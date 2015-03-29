@@ -14,5 +14,11 @@
             "targetName": "class_example",
             "mainSourceFile": "examples/class_hierachy_example.d"
         },
+        {
+            "name": "module_example",
+            "targetType": "executable",
+            "targetName": "module_example",
+            "mainSourceFile": "examples/module_dependency_example.d"
+        },
     ]
 }

@@ -9,5 +9,11 @@ A class hierarchy example can be run by using one of the additional
 configurations defined.
 
 ```
-dub run -q --config=class_example | dot -Tpng > example.png
+dub run -q --config=class_example | dot -Tpng > class_example.png
+```
+
+A module dependency example can be run by using another configuration.
+
+```
+dub run -q --config=module_example | dot -Tpng > module_example.png
 ```

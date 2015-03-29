@@ -1,15 +1,37 @@
 module hier;
 
-import std.stdio;
-import std.range;
+import std.range: isInputRange, isOutputRange;
 import std.algorithm;
-import std.array;
-import std.regex;
+import std.regex: Regex, match;
+import std.typecons: Unqual;
 
-/++
- + This module defines a set of algorithms for printing information for
- + class hierarchies and other module information.
- +/
+private alias Set(V) = void[0][V];
+
+@nogc @safe pure nothrow
+private bool contains(T, U)(inout(void[0][T]) set, auto ref inout(U) value)
+if(is(Unqual!U : Unqual!T)) {
+    return (value in set) !is null;
+}
+
+@safe pure nothrow
+private void add(T, U)(ref void[0][T] set, auto ref U value)
+if(is(U : T)) {
+    set[value] = (void[0]).init;
+}
+
+/**
+ * Given a range of values, create a set from that range.
+ */
+private auto toSet(InputRange)(InputRange inputRange)
+if(isInputRange!InputRange) {
+    Set!(typeof(inputRange.front)) set;
+
+    foreach(value; inputRange) {
+        set.add(value);
+    }
+
+    return set;
+}
 
 /**
  * Params:
@@ -28,22 +50,17 @@ bool isInterface(const ClassInfo info) {
  */
 struct ClassHierarchyInfo {
 private:
-    bool[const(ClassInfo)] _classSet;
+    Set!(const(ClassInfo)) _classSet;
 public:
+    /**
+     * Construct the class hierarchy info with an existing set of classes.
+     */
     @safe pure nothrow
-    this(this) {
-        // Copy the set in a rather convoluted way, so it can be done with
-        // the right attributes applied to the method.
-        auto oldClassSet = _classSet;
-
-        _classSet = null;
-
-        try {
-            foreach(key, _; oldClassSet) {
-                _classSet[key] = true;
-            }
-        } catch(Exception) {}
+    this(Set!(const(ClassInfo)) classSet) {
+        _classSet = classSet;
     }
+
+    @disable this(this);
 
     /**
      * Returns: true if this object already knows about the given class
@@ -51,17 +68,25 @@ public:
      */
     @nogc @safe pure nothrow
     bool hasClass(const(ClassInfo) info) const {
-        return (info in _classSet) !is null;
+        return _classSet.contains(info);
     }
 
     /**
      * Returns: The set of classes and interfaces currently held in the object.
      */
-    @nogc @trusted pure nothrow
-    @property const(bool[ClassInfo]) classSet() const {
-        return cast(const(bool[ClassInfo])) _classSet;
+    @nogc @safe pure nothrow
+    @property const(Set!(const(ClassInfo))) classSet() const {
+        return _classSet;
     }
 
+    /**
+     * Returns: The set of classes and interfaces currently held in the object
+     * as an InputRange, in some undefined order.
+     */
+    @nogc @system pure nothrow
+    @property auto classes() const {
+        return _classSet.byKey;
+    }
 
     /**
      * Add just a class or interface to the object.
@@ -71,7 +96,7 @@ public:
      */
     @safe pure nothrow
     void addClass(const ClassInfo info) {
-        _classSet[info] = true;
+        _classSet.add(info);
     }
 
     /**
@@ -99,7 +124,6 @@ public:
         }
     }
 
-    // BUG: ModuleInfo can't be const here, as localClasses is not const.
     /**
      * Add a module and all contained classes with super types to the object.
      *
@@ -107,7 +131,7 @@ public:
      *     mod = The module.
      */
     @trusted pure nothrow
-    void addModule(ModuleInfo* mod) {
+    void addModule(const(ModuleInfo*) mod) {
         foreach(info; mod.localClasses) {
             addClassWithAncestors(info);
         }
@@ -135,16 +159,20 @@ public:
  *
  * Returns: A copy of the hierarchy information without the matches.
  */
+@trusted
+ClassHierarchyInfo filterOut(ref ClassHierarchyInfo hierInfo, Regex!char re) {
+    return typeof(return)(
+        hierInfo
+        .classes
+        .filter!(x => !x.name.match(re))
+        .toSet
+    );
+}
+
+/// ditto
+@safe
 ClassHierarchyInfo filterOut(ClassHierarchyInfo hierInfo, Regex!char re) {
-    ClassHierarchyInfo filteredCopy;
-
-    foreach(info, _; hierInfo.classSet) {
-        if (!info.name.match(re)) {
-            filteredCopy._classSet[info] = true;
-        }
-    }
-
-    return filteredCopy;
+    return hierInfo.filterOut(re);
 }
 
 /*
@@ -164,70 +192,61 @@ digraph {
 }
 */
 
-/**
- * Write a DOT language description of the class hierarchy information to an
- * output range.
- *
- * Params:
- *     hier = The hierarchy information.
- *     range = The output range.
- */
-void writeDOT(R)(ClassHierarchyInfo hier, R range)
-if (isOutputRange!(R, char)) {
-    void writeLabel(ClassInfo info) {
+enum IncludeAttributes: bool { no, yes };
+
+void writeDOT(IncludeAttributes includeAttributes, R)
+(auto ref ClassHierarchyInfo hier, R range) {
+    void writeClassName(const(ClassInfo) info) {
         range.put('"');
         info.name.copy(range);
         range.put('"');
     }
 
-    void writeEdges(ClassInfo info) {
+    void writeEdges(const(ClassInfo) info) {
         // Write subclass -> interface
         foreach(face; info.interfaces) {
             if (face.classinfo in hier.classSet) {
-                range.put('\t');
-                writeLabel(info);
+                writeClassName(info);
                 " -> ".copy(range);
-                writeLabel(face.classinfo);
+                writeClassName(face.classinfo);
                 ";\n".copy(range);
             }
         }
 
         // Write subclass -> superclass.
         if (info.base !is null && info.base in hier.classSet) {
-            range.put('\t');
-            writeLabel(info);
+            writeClassName(info);
             " -> ".copy(range);
-            writeLabel(info.base);
+            writeClassName(info.base);
             ";\n".copy(range);
         }
     }
 
     // Open the graph file.
     "digraph {\n".copy(range);
-    "\trankdir=BT;\n\n".copy(range);
+    "rankdir=BT;\n\n".copy(range);
 
     // Write all of the interface nodes up front with some settings which
     // can be applied to them.
-    "\tnode[rank=source, shape=box, color=blue, penwidth=2];\n".copy(range);
-    "\t//Interface nodes.\n".copy(range);
+    "node[rank=source, shape=box, color=blue, penwidth=2];\n".copy(range);
+    "//Interface nodes.\n".copy(range);
 
-    foreach(info, _; hier.classSet) {
+    // List all of the interace nodes.
+    foreach(info; hier.classes) {
         if (isInterface(info)) {
-            range.put('\t');
-            writeLabel(info);
+            writeClassName(info);
             ";\n".copy(range);
         }
     }
 
     // Set different node settings for classes.
-    "\n\tnode[color=black];\n\n".copy(range);
-    "\t//Class nodes.\n".copy(range);
+    "\nnode[color=black];\n\n".copy(range);
+    "//Class nodes.\n".copy(range);
 
     // List all of the class nodes.
-    foreach(info, _; hier.classSet) {
+    foreach(info; hier.classes) {
         if (!isInterface(info)) {
-            range.put('\t');
-            writeLabel(info);
+            writeClassName(info);
             ";\n".copy(range);
         }
     }
@@ -235,9 +254,260 @@ if (isOutputRange!(R, char)) {
     range.put('\n');
 
     // Now write the edges out, which is the most important information.
-    foreach(info, _; hier.classSet) {
+    foreach(info; hier.classes) {
         writeEdges(info);
     }
 
     range.put('}');
 }
+
+/**
+ * Write a DOT language description of the class and interface
+ * hierarchies with just the class names to a DOT file.
+ *
+ * Params:
+ *     hier = The hierarchy information.
+ *     range = The output range.
+ */
+void writeNamesToDOT(R)(auto ref ClassHierarchyInfo hier, R range)
+if (isOutputRange!(R, char)) {
+    writeDOT!(IncludeAttributes.no, R)(hier, range);
+}
+
+version(unittest) {
+private:
+
+interface Editable {}
+interface Tweakable : Editable {}
+interface Special {}
+class Widget : Tweakable {}
+class SpecialWidget : Widget {}
+class SuperSpecialWidget : SpecialWidget, Special {}
+class NotSoSpecialWidget : Widget {}
+
+enum nameHierarchyDOT =
+`digraph {
+rankdir=BT;
+
+node[rank=source, shape=box, color=blue, penwidth=2];
+//Interface nodes.
+"hier.Editable";
+"hier.Tweakable";
+
+node[color=black];
+
+//Class nodes.
+"hier.NotSoSpecialWidget";
+"hier.Widget";
+
+"hier.NotSoSpecialWidget" -> "hier.Widget";
+"hier.Widget" -> "hier.Tweakable";
+"hier.Tweakable" -> "hier.Editable";
+}`;
+}
+
+// Test if the right DOT file will be outputted for some given class data.
+// This does depend on the order of the associative arrays a little...
+unittest {
+    import std.array;
+    import std.regex;
+
+    ClassHierarchyInfo hierInfo;
+
+    hierInfo.addClassWithAncestors(NotSoSpecialWidget.classinfo);
+
+    // Filter out a few standard libraries classes/interfaces.
+    hierInfo = hierInfo.filterOut(ctRegex!(
+        `(^object\.|^std\.|^core.|^TypeInfo|^gc\.|rt\.)`));
+
+    Appender!string appender;
+
+    hierInfo.writeNamesToDOT(&appender);
+
+    assert(appender.data == nameHierarchyDOT);
+}
+
+/**
+ * Write a DOT language description of the class and interface hierarchies to
+ * a DOT file with methods and attributes included. This should create a UML
+ * style diagram.
+ *
+ * Params:
+ *     hier = The hierarchy information.
+ *     range = The output range.
+ */
+void writeUMLToDOT(R)(auto ref ClassHierarchyInfo hier, R range)
+if (isOutputRange!(R, char)) {
+    writeDOT!(IncludeAttributes.yes, R)(hier, range);
+}
+
+
+/**
+ * This type contains a set of modules with some methods for conveniently
+ * collecting modules. This type can be used for generating module dependency
+ * graphs.
+ */
+struct ModuleDependencyInfo {
+private:
+    Set!(const(ModuleInfo*)) _moduleSet;
+public:
+    /**
+     * Construct the class hierarchy info with an existing set of modules.
+     */
+    @safe pure nothrow
+    this(Set!(const(ModuleInfo*)) moduleSet) {
+        _moduleSet = moduleSet;
+    }
+
+    @disable this(this);
+
+    /**
+     * Returns: true if this object already knows about the given module.
+     */
+    @nogc @safe pure nothrow
+    bool hasModule(const(ModuleInfo*) info) const {
+        return _moduleSet.contains(info);
+    }
+
+    /**
+     * Returns: The set of modules currently held in the object.
+     */
+    @nogc @safe pure nothrow
+    @property const(Set!(const(ModuleInfo*))) moduleSet() const {
+        return _moduleSet;
+    }
+
+    /**
+     * Returns: The set of modules currently held in the object as an
+     * InputRange, in some undefined order.
+     */
+    @nogc @system pure nothrow
+    @property auto modules() const {
+        return _moduleSet.byKey;
+    }
+
+    /**
+     * Add a module to the object.
+     *
+     * Params:
+     *     mod = The module.
+     */
+    @trusted pure nothrow
+    void addModule(const(ModuleInfo*) mod) {
+        _moduleSet.add(mod);
+    }
+
+    /**
+     * Add a module with all of its dependencies, recursively walking through
+     * dependant modules until all modules are discovered.
+     */
+    @trusted pure nothrow
+    void addModuleWithDependencies(const(ModuleInfo*) mod) {
+        addModule(mod);
+
+        // Add the imported module.
+        foreach(importedModule; mod.importedModules) {
+            if (!hasModule(importedModule)) {
+                addModuleWithDependencies(importedModule);
+            }
+        }
+    }
+
+    /**
+     * Add every module available to this object, from all of the modules
+     * which can be seen through imports.
+     */
+    @trusted
+    void addAbsolutelyEverything() {
+        foreach(mod; ModuleInfo) {
+            addModuleWithDependencies(mod);
+        }
+    }
+}
+
+/**
+ * Create a copy of the module dependency info object without module names
+ * matching the given regular expression.
+ *
+ * Params:
+ *     dependencyInfo = The module dependency information to copy.
+ *     re = A regular expression for filtering out module names.
+ *
+ * Returns: A copy of the dependency information without the matches.
+ */
+@trusted
+ModuleDependencyInfo filterOut
+(ref ModuleDependencyInfo dependencyInfo, Regex!char re) {
+    return typeof(return)(
+        dependencyInfo
+        .modules
+        .filter!(x => !x.name.match(re))
+        .toSet
+    );
+}
+
+/// ditto
+@safe
+ModuleDependencyInfo filterOut
+(ModuleDependencyInfo dependencyInfo, Regex!char re) {
+    return dependencyInfo.filterOut(re);
+}
+
+/**
+ * Write a DOT language description of the module dependency graph to
+ * a DOT file.
+ *
+ * Params:
+ *     dependencyInfo = The module dependency information.
+ *     range = The output range.
+ */
+void writeDOT(R)(auto ref ModuleDependencyInfo depInfo, R range) {
+    import std.typecons;
+
+    // We have to collect the edges we written in a set and make sure we
+    // don't write them twice, as importedModules can contain a module several
+    // times over.
+    Set!(Tuple!(const(ModuleInfo)*, immutable(ModuleInfo)*)) writtenEdgeSet;
+
+    void writeModuleName(const(ModuleInfo*) mod) {
+        range.put('"');
+        mod.name.copy(range);
+        range.put('"');
+    }
+
+    void writeEdges(const(ModuleInfo*) mod) {
+        foreach(importedModule; mod.importedModules) {
+             if (depInfo.hasModule(importedModule)
+             && !writtenEdgeSet.contains(tuple(mod, importedModule))) {
+                writeModuleName(mod);
+                " -> ".copy(range);
+                writeModuleName(importedModule);
+                ";\n".copy(range);
+
+                writtenEdgeSet.add(tuple(mod, importedModule));
+             }
+        }
+    }
+
+    // Open the graph file.
+    "digraph {\n".copy(range);
+    "rankdir=BT;\n\n".copy(range);
+
+    range.put('\n');
+
+    // Set different node settings for modules.
+    "\nnode[color=black];\n\n".copy(range);
+    "//Module nodes.\n".copy(range);
+
+    foreach(mod; depInfo.modules) {
+        writeModuleName(mod);
+        ";\n".copy(range);
+    }
+
+    foreach(mod; depInfo.modules) {
+        writeEdges(mod);
+    }
+
+    range.put('}');
+}
+

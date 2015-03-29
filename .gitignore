@@ -1,5 +1,8 @@
 /libdhier.a
+/__test__default__
 /.dub
 /dub.selections.json
 /class_example
-/example.png
+/module_example
+/class_example.png
+/module_example.png
