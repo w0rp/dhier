@@ -20,5 +20,11 @@
             "targetName": "module_example",
             "mainSourceFile": "examples/module_dependency_example.d"
         },
+        {
+            "name": "ranked_module_example",
+            "targetType": "executable",
+            "targetName": "ranked_module_example",
+            "mainSourceFile": "examples/ranked_module_dependency_example.d"
+        },
     ]
 }

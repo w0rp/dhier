@@ -511,3 +511,146 @@ void writeDOT(R)(auto ref ModuleDependencyInfo depInfo, R range) {
     range.put('}');
 }
 
+/**
+ * Write a DOT language description of the module dependency graph to
+ * a DOT file. The modules will be ranked by the number of times they are
+ * imported, and the lines will be drawn orthongonally.
+ *
+ * Params:
+ *     dependencyInfo = The module dependency information.
+ *     range = The output range.
+ */
+void writeRankedDOT(R)(auto ref ModuleDependencyInfo depInfo, R range) {
+    import std.typecons;
+    import std.conv: to;
+
+    // We have to collect the edges we written in a set and make sure we
+    // don't write them twice, as importedModules can contain a module several
+    // times over.
+    Set!(Tuple!(const(ModuleInfo)*, immutable(ModuleInfo)*)) writtenEdgeSet;
+    // We need to track counted edges separately.
+    Set!(Tuple!(const(ModuleInfo)*, immutable(ModuleInfo)*)) countedEdgeSet;
+    // We need to keep a record of the incoming edge counts.
+    size_t[const(ModuleInfo)*] incomingEdgeCountMap;
+
+    void writeModuleName(const(ModuleInfo*) mod) {
+        range.put('"');
+        mod.name.copy(range);
+        range.put('"');
+    }
+
+    // In order for the ranking to work, we have to write the numbers first
+    // before the regular edges. So counting and writing edges has to be two
+    // isolated procedures.
+    void countEdges(const(ModuleInfo*) mod) {
+        if (mod !in incomingEdgeCountMap) {
+            // Set the incoming edge count for outgoing edges to 0 at first,
+            // so we can rank modules which aren't imported anywhere too.
+            incomingEdgeCountMap[mod] = 0;
+        }
+
+        foreach(importedModule; mod.importedModules) {
+             if (depInfo.hasModule(importedModule)
+             && !countedEdgeSet.contains(tuple(mod, importedModule))) {
+                countedEdgeSet.add(tuple(mod, importedModule));
+
+                // Increment or set the incoming edge count.
+                auto countPtr = importedModule in incomingEdgeCountMap;
+
+                if (countPtr) {
+                    *countPtr = *countPtr + 1;
+                } else {
+                    incomingEdgeCountMap[importedModule] = 1;
+                }
+             }
+        }
+    }
+
+    void writeEdges(const(ModuleInfo*) mod) {
+        foreach(importedModule; mod.importedModules) {
+             if (depInfo.hasModule(importedModule)
+             && !writtenEdgeSet.contains(tuple(mod, importedModule))) {
+                writeModuleName(mod);
+                " -> ".copy(range);
+                writeModuleName(importedModule);
+                ";\n".copy(range);
+
+                writtenEdgeSet.add(tuple(mod, importedModule));
+             }
+        }
+    }
+
+    // Open the graph file.
+    "digraph {\n".copy(range);
+    "splines=ortho;\n".copy(range);
+    "rankdir=BT;\n\n".copy(range);
+
+    range.put('\n');
+
+    // count the incoming edges and so on.
+    foreach(mod; depInfo.modules) {
+        countEdges(mod);
+    }
+
+    // Now let's reverse the mapping to count -> module_list.
+    const(ModuleInfo*)[][size_t] countToVertexMap;
+
+    foreach(mod, count; incomingEdgeCountMap) {
+        auto arrayPtr = count in countToVertexMap;
+
+        if (arrayPtr) {
+            *arrayPtr ~= mod;
+        } else {
+            countToVertexMap[count] = [mod];
+        }
+    }
+
+    // Now we can write the counts out as edges by themself.
+    // This will trick Graphviz into drawing things in ranks.
+    bool firstCount = true;
+
+    "node[shape=none]".copy(range);
+
+    foreach(count; countToVertexMap.keys.sort) {
+        if (!firstCount) {
+            "->".copy(range);
+        }
+
+        count.to!string.copy(range);
+
+        firstCount = false;
+    }
+
+    "[arrowhead=none];\n".copy(range);
+
+    // Now we'll write {rank=same 1; foo; bar;} to set the node rankings.
+    foreach(count, modList; countToVertexMap) {
+        "{rank=same ".copy(range);
+
+        count.to!string.copy(range);
+        "; ".copy(range);
+
+        foreach(mod; modList) {
+            writeModuleName(mod);
+            "; ".copy(range);
+        }
+
+        "}\n".copy(range);
+    }
+
+    // Now we can write our actual nodes and edges out for the proper graph.
+    "//Module nodes.\n".copy(range);
+
+    foreach(mod; depInfo.modules) {
+        writeModuleName(mod);
+        "[shape=box, color=black]".copy(range);
+        ";\n".copy(range);
+    }
+
+    foreach(mod; depInfo.modules) {
+        writeEdges(mod);
+    }
+
+    range.put('}');
+}
+

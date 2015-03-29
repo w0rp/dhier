@@ -17,3 +17,9 @@ A module dependency example can be run by using another configuration.
 ```
 dub run -q --config=module_example | dot -Tpng > module_example.png
 ```
+
+The library also supports graphs of modules, ranked by the number of times they are imported.
+
+```
+dub run -q --config=ranked_module_example | dot -Tpng > ranked_module_example.png
+```

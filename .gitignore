@@ -3,6 +3,8 @@
 /.dub
 /dub.selections.json
 /class_example
-/module_example
 /class_example.png
+/module_example
 /module_example.png
+/ranked_module_example
+/ranked_module_example.png
