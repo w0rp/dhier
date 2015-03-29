@@ -350,6 +350,7 @@ if (isOutputRange!(R, char)) {
 struct ModuleDependencyInfo {
 private:
     Set!(const(ModuleInfo*)) _moduleSet;
+    Set!(const(ModuleInfo*)) _leafSet;
 public:
     /**
      * Construct the class hierarchy info with an existing set of modules.
@@ -365,8 +366,24 @@ public:
      * Returns: true if this object already knows about the given module.
      */
     @nogc @safe pure nothrow
-    bool hasModule(const(ModuleInfo*) info) const {
-        return _moduleSet.contains(info);
+    bool hasModule(const(ModuleInfo*) mod) const {
+        return _moduleSet.contains(mod);
+    }
+
+    /**
+     * Returns: true if this object knows about a module, and it is a leaf.
+     */
+    @nogc @trusted pure nothrow
+    bool hasLeafModule(const(ModuleInfo*) mod) {
+        return mod in _moduleSet && mod in _leafSet;
+    }
+
+    /**
+     * Returns: true if this object knows about a module, and it is not a leaf.
+     */
+    @nogc @trusted pure nothrow
+    bool hasDependentModule(const(ModuleInfo*) mod) {
+        return mod in _moduleSet && mod !in _leafSet;
     }
 
     /**
@@ -387,28 +404,61 @@ public:
     }
 
     /**
-     * Add a module to the object.
+     * Add a module to the object. The module will be marked as a leaf if it
+     * has not already been added.
      *
      * Params:
      *     mod = The module.
      */
     @trusted pure nothrow
     void addModule(const(ModuleInfo*) mod) {
-        _moduleSet.add(mod);
+        if (!_moduleSet.contains(mod)) {
+            _moduleSet.add(mod);
+            _leafSet.add(mod);
+        }
     }
 
     /**
      * Add a module with all of its dependencies, recursively walking through
-     * dependant modules until all modules are discovered.
+     * dependent modules until all modules are discovered.
+     *
+     * The module will not be considered a leaf node, even if it has already
+     * been added, nor will its dependencies.
+     *
+     * Params:
+     *     mod = The module.
      */
     @trusted pure nothrow
     void addModuleWithDependencies(const(ModuleInfo*) mod) {
-        addModule(mod);
+        _moduleSet.add(mod);
+        _leafSet.remove(mod);
 
         // Add the imported module.
         foreach(importedModule; mod.importedModules) {
             if (!hasModule(importedModule)) {
                 addModuleWithDependencies(importedModule);
+            }
+        }
+    }
+
+    /**
+     * Add a module with all of its direct dependencies, just the modules
+     * a module has imported.
+     *
+     * The module will not be considered a leaf node, however its dependencies
+     * will be, unless they are added through some other means.
+     *
+     * Params:
+     *     mod = The module.
+     */
+    @trusted pure nothrow
+    void addModuleWithDirectDepdencies(const(ModuleInfo*) mod) {
+        _moduleSet.add(mod);
+        _leafSet.remove(mod);
+
+        foreach(importedModule; mod.importedModules) {
+            if (!hasModule(importedModule)) {
+                addModule(importedModule);
             }
         }
     }
@@ -505,7 +555,9 @@ void writeDOT(R)(auto ref ModuleDependencyInfo depInfo, R range) {
     }
 
     foreach(mod; depInfo.modules) {
-        writeEdges(mod);
+        if (depInfo.hasDependentModule(mod)) {
+            writeEdges(mod);
+        }
     }
 
     range.put('}');
@@ -648,9 +700,10 @@ void writeRankedDOT(R)(auto ref ModuleDependencyInfo depInfo, R range) {
     }
 
     foreach(mod; depInfo.modules) {
-        writeEdges(mod);
+        if (depInfo.hasDependentModule(mod)) {
+            writeEdges(mod);
+        }
     }
 
     range.put('}');
 }
-
