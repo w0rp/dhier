@@ -6,6 +6,12 @@
     "homepage": "https://github.com/w0rp/dhier",
     "license": "BSD 2-clause",
     "copyright": "Copyright © 2015, w0rp",
+    "dependencies": {
+        "dstruct": {
+            "version": "==0.2.2",
+            "path": "../dstruct"
+        }
+    },
     "configurations": [
         {"name": "default"},
         {
@@ -25,6 +31,6 @@
             "targetType": "executable",
             "targetName": "ranked_module_example",
             "mainSourceFile": "examples/ranked_module_dependency_example.d"
-        },
+        }
     ]
 }

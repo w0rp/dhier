@@ -18,14 +18,14 @@ class SuperSpecialWidget : SpecialWidget, Special {}
 class NotSoSpecialWidget : Widget {}
 
 void main(string[] argv) {
-    ClassHierarchyInfo hierInfo;
+    ClassGraph graph;
 
-    hierInfo.addAbsolutelyEverything();
+    graph.addAbsolutelyEverything();
 
     // Filter out a few standard libraries classes/interfaces.
-    hierInfo = hierInfo.filterOut(ctRegex!(
+    graph = graph.filterOut(ctRegex!(
         `(^object\.|^std\.|^core\.|^TypeInfo|^gc\.|^rt\.)`));
 
-    hierInfo.writeNamesToDOT(stdout.lockingTextWriter);
+    graph.writeNamesToDOT(stdout.lockingTextWriter);
 }
 

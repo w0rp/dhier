@@ -10,13 +10,13 @@ import std.regex;
 import hier;
 
 void main(string[] argv) {
-    ModuleDependencyInfo depInfo;
+    ModuleGraph graph;
 
-    depInfo.addAbsolutelyEverything();
+    graph.addAbsolutelyEverything();
 
-    depInfo = depInfo.filterOut(ctRegex!(
+    graph = graph.filterOut(ctRegex!(
         `(^ranked_module_dependency_example$|^hier$|^object$|^core\.|^gc\.|^rt\.)`));
 
-    depInfo.writeRankedDOT(stdout.lockingTextWriter);
+    graph.writeRankedDOT(stdout.lockingTextWriter);
 }
 

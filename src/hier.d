@@ -5,33 +5,8 @@ import std.algorithm;
 import std.regex: Regex, match;
 import std.typecons: Unqual;
 
-private alias Set(V) = void[0][V];
-
-@nogc @safe pure nothrow
-private bool contains(T, U)(inout(void[0][T]) set, auto ref inout(U) value)
-if(is(Unqual!U : Unqual!T)) {
-    return (value in set) !is null;
-}
-
-@safe pure nothrow
-private void add(T, U)(ref void[0][T] set, auto ref U value)
-if(is(U : T)) {
-    set[value] = (void[0]).init;
-}
-
-/**
- * Given a range of values, create a set from that range.
- */
-private auto toSet(InputRange)(InputRange inputRange)
-if(isInputRange!InputRange) {
-    Set!(typeof(inputRange.front)) set;
-
-    foreach(value; inputRange) {
-        set.add(value);
-    }
-
-    return set;
-}
+import dstruct.graph;
+import dstruct.map;
 
 /**
  * Params:
@@ -44,135 +19,73 @@ bool isInterface(const ClassInfo info) {
     return info.base is null && info !is Object.classinfo;
 }
 
-/**
- * This struct defines a collection of classes for outputting class hierarchy
- * information.
- */
-struct ClassHierarchyInfo {
-private:
-    Set!(const(ClassInfo)) _classSet;
-public:
-    /**
-     * Construct the class hierarchy info with an existing set of classes.
-     */
-    @safe pure nothrow
-    this(Set!(const(ClassInfo)) classSet) {
-        _classSet = classSet;
-    }
-
-    @disable this(this);
-
-    /**
-     * Returns: true if this object already knows about the given class
-     * or interface.
-     */
-    @nogc @safe pure nothrow
-    bool hasClass(const(ClassInfo) info) const {
-        return _classSet.contains(info);
-    }
-
-    /**
-     * Returns: The set of classes and interfaces currently held in the object.
-     */
-    @nogc @safe pure nothrow
-    @property const(Set!(const(ClassInfo))) classSet() const {
-        return _classSet;
-    }
-
-    /**
-     * Returns: The set of classes and interfaces currently held in the object
-     * as an InputRange, in some undefined order.
-     */
-    @nogc @system pure nothrow
-    @property auto classes() const {
-        return _classSet.byKey;
-    }
-
-    /**
-     * Add just a class or interface to the object.
-     *
-     * Params:
-     *     info = The ClassInfo object for a class or interface.
-     */
-    @safe pure nothrow
-    void addClass(const ClassInfo info) {
-        _classSet.add(info);
-    }
-
-    /**
-     * Add a class and all super-types to the object.
-     *
-     * If this class has already been added to the object,
-     *
-     * Params:
-     *     info = The ClassInfo object for a class or interface.
-     */
-    @safe pure nothrow
-    void addClassWithAncestors(const ClassInfo info) {
-        addClass(info);
-
-        // Add inherited interfaces.
-        foreach(face; info.interfaces) {
-            if (!hasClass(face.classinfo)) {
-                addClassWithAncestors(face.classinfo);
-            }
-        }
-
-        // Add the base class of this class.
-        if (info.base !is null && !hasClass(info.base)) {
-            addClassWithAncestors(info.base);
-        }
-    }
-
-    /**
-     * Add a module and all contained classes with super types to the object.
-     *
-     * Params:
-     *     mod = The module.
-     */
-    @trusted pure nothrow
-    void addModule(const(ModuleInfo*) mod) {
-        foreach(info; mod.localClasses) {
-            addClassWithAncestors(info);
-        }
-    }
-
-    /**
-     * Add every module available to this object, from all of the modules
-     * which can be seen through imports.
-     */
-    @trusted
-    void addAbsolutelyEverything() {
-        foreach(mod; ModuleInfo) {
-            addModule(mod);
-        }
-    }
-}
+/// An alias for a digraph over classes.
+alias ClassGraph = Digraph!(const(ClassInfo));
 
 /**
- * Create a copy of the class hierarchy info object without class and
- * interface names matching the given regular expression.
+ * Add just a class or interface to the object.
+ *
+ * This simply adds a vertex to the graph.
  *
  * Params:
- *     hierInfo = The hierarchy information to copy.
- *     re = A regular expression for filtering out class and interface names.
- *
- * Returns: A copy of the hierarchy information without the matches.
+ *     graph = The graph to work with.
+ *     info = The ClassInfo object for a class or interface.
  */
 @trusted
-ClassHierarchyInfo filterOut(ref ClassHierarchyInfo hierInfo, Regex!char re) {
-    return typeof(return)(
-        hierInfo
-        .classes
-        .filter!(x => !x.name.match(re))
-        .toSet
-    );
+void addClass(ref ClassGraph graph, const(ClassInfo) info) {
+    graph.addVertex(info);
 }
 
-/// ditto
-@safe
-ClassHierarchyInfo filterOut(ClassHierarchyInfo hierInfo, Regex!char re) {
-    return hierInfo.filterOut(re);
+/**
+ * Add a class and all super-types to the object.
+ *
+ * Params:
+ *     graph = The graph to add ancestors into.
+ *     info = The ClassInfo object for a class or interface.
+ */
+@trusted
+void addClassWithAncestors(ref ClassGraph graph, const(ClassInfo) info) {
+    graph.addVertex(info);
+
+    // Add inherited interfaces.
+    foreach(face; info.interfaces) {
+        graph.addEdge(info, face.classinfo);
+        graph.addClassWithAncestors(face.classinfo);
+    }
+
+    // Add the base class of this class.
+    if (info.base !is null) {
+        graph.addEdge(info, info.base);
+        graph.addClassWithAncestors(info.base);
+    }
+}
+
+/**
+ * Add a module and all contained classes with super types to the object.
+ *
+ * Params:
+ *     graph = The graph to add a module into.
+ *     mod = The module.
+ */
+@trusted
+void addModule(ref ClassGraph graph, const(ModuleInfo*) mod) {
+    foreach(info; mod.localClasses) {
+        graph.addClassWithAncestors(info);
+    }
+}
+
+/**
+ * Add every module available to this object, from all of the modules
+ * which can be seen through imports.
+ *
+ * Params:
+ *     graph = The graph to add everything into.
+ */
+@trusted
+void addAbsolutelyEverything(ref ClassGraph graph) {
+    foreach(mod; ModuleInfo) {
+        graph.addModule(mod);
+    }
 }
 
 /*
@@ -195,31 +108,11 @@ digraph {
 enum IncludeAttributes: bool { no, yes };
 
 void writeDOT(IncludeAttributes includeAttributes, R)
-(auto ref ClassHierarchyInfo hier, R range) {
+(const(ClassGraph) graph, R range) {
     void writeClassName(const(ClassInfo) info) {
         range.put('"');
         info.name.copy(range);
         range.put('"');
-    }
-
-    void writeEdges(const(ClassInfo) info) {
-        // Write subclass -> interface
-        foreach(face; info.interfaces) {
-            if (face.classinfo in hier.classSet) {
-                writeClassName(info);
-                " -> ".copy(range);
-                writeClassName(face.classinfo);
-                ";\n".copy(range);
-            }
-        }
-
-        // Write subclass -> superclass.
-        if (info.base !is null && info.base in hier.classSet) {
-            writeClassName(info);
-            " -> ".copy(range);
-            writeClassName(info.base);
-            ";\n".copy(range);
-        }
     }
 
     // Open the graph file.
@@ -232,7 +125,7 @@ void writeDOT(IncludeAttributes includeAttributes, R)
     "//Interface nodes.\n".copy(range);
 
     // List all of the interace nodes.
-    foreach(info; hier.classes) {
+    foreach(info; graph.vertices) {
         if (isInterface(info)) {
             writeClassName(info);
             ";\n".copy(range);
@@ -244,7 +137,7 @@ void writeDOT(IncludeAttributes includeAttributes, R)
     "//Class nodes.\n".copy(range);
 
     // List all of the class nodes.
-    foreach(info; hier.classes) {
+    foreach(info; graph.vertices) {
         if (!isInterface(info)) {
             writeClassName(info);
             ";\n".copy(range);
@@ -254,8 +147,11 @@ void writeDOT(IncludeAttributes includeAttributes, R)
     range.put('\n');
 
     // Now write the edges out, which is the most important information.
-    foreach(info; hier.classes) {
-        writeEdges(info);
+    foreach(edge; graph.edges) {
+        writeClassName(edge.from);
+        " -> ".copy(range);
+        writeClassName(edge.to);
+        ";\n".copy(range);
     }
 
     range.put('}');
@@ -266,12 +162,12 @@ void writeDOT(IncludeAttributes includeAttributes, R)
  * hierarchies with just the class names to a DOT file.
  *
  * Params:
- *     hier = The hierarchy information.
+ *     graph = The class graph.
  *     range = The output range.
  */
-void writeNamesToDOT(R)(auto ref ClassHierarchyInfo hier, R range)
+void writeNamesToDOT(R)(const(ClassGraph) graph, R range)
 if (isOutputRange!(R, char)) {
-    writeDOT!(IncludeAttributes.no, R)(hier, range);
+    writeDOT!(IncludeAttributes.no, R)(graph, range);
 }
 
 version(unittest) {
@@ -291,8 +187,8 @@ rankdir=BT;
 
 node[rank=source, shape=box, color=blue, penwidth=2];
 //Interface nodes.
-"hier.Editable";
 "hier.Tweakable";
+"hier.Editable";
 
 node[color=black];
 
@@ -300,9 +196,9 @@ node[color=black];
 "hier.NotSoSpecialWidget";
 "hier.Widget";
 
+"hier.Tweakable" -> "hier.Editable";
 "hier.NotSoSpecialWidget" -> "hier.Widget";
 "hier.Widget" -> "hier.Tweakable";
-"hier.Tweakable" -> "hier.Editable";
 }`;
 }
 
@@ -312,17 +208,17 @@ unittest {
     import std.array;
     import std.regex;
 
-    ClassHierarchyInfo hierInfo;
+    ClassGraph graph;
 
-    hierInfo.addClassWithAncestors(NotSoSpecialWidget.classinfo);
+    graph.addClassWithAncestors(NotSoSpecialWidget.classinfo);
 
     // Filter out a few standard libraries classes/interfaces.
-    hierInfo = hierInfo.filterOut(ctRegex!(
+    graph = graph.filterOut(ctRegex!(
         `(^object\.|^std\.|^core.|^TypeInfo|^gc\.|rt\.)`));
 
     Appender!string appender;
 
-    hierInfo.writeNamesToDOT(&appender);
+    graph.writeNamesToDOT(&appender);
 
     assert(appender.data == nameHierarchyDOT);
 }
@@ -333,174 +229,109 @@ unittest {
  * style diagram.
  *
  * Params:
- *     hier = The hierarchy information.
+ *     graph = The class graph.
  *     range = The output range.
  */
-void writeUMLToDOT(R)(auto ref ClassHierarchyInfo hier, R range)
+void writeUMLToDOT(R)(const(ClassGraph) graph, R range)
 if (isOutputRange!(R, char)) {
-    writeDOT!(IncludeAttributes.yes, R)(hier, range);
+    writeDOT!(IncludeAttributes.yes, R)(graph, range);
 }
+
+/// An alias for a digraph over module.
+alias ModuleGraph = Digraph!(const(ModuleInfo*));
 
 
 /**
- * This type contains a set of modules with some methods for conveniently
- * collecting modules. This type can be used for generating module dependency
- * graphs.
- */
-struct ModuleDependencyInfo {
-private:
-    Set!(const(ModuleInfo*)) _moduleSet;
-    Set!(const(ModuleInfo*)) _leafSet;
-public:
-    /**
-     * Construct the class hierarchy info with an existing set of modules.
-     */
-    @safe pure nothrow
-    this(Set!(const(ModuleInfo*)) moduleSet) {
-        _moduleSet = moduleSet;
-    }
-
-    @disable this(this);
-
-    /**
-     * Returns: true if this object already knows about the given module.
-     */
-    @nogc @safe pure nothrow
-    bool hasModule(const(ModuleInfo*) mod) const {
-        return _moduleSet.contains(mod);
-    }
-
-    /**
-     * Returns: true if this object knows about a module, and it is a leaf.
-     */
-    @nogc @trusted pure nothrow
-    bool hasLeafModule(const(ModuleInfo*) mod) {
-        return mod in _moduleSet && mod in _leafSet;
-    }
-
-    /**
-     * Returns: true if this object knows about a module, and it is not a leaf.
-     */
-    @nogc @trusted pure nothrow
-    bool hasDependentModule(const(ModuleInfo*) mod) {
-        return mod in _moduleSet && mod !in _leafSet;
-    }
-
-    /**
-     * Returns: The set of modules currently held in the object.
-     */
-    @nogc @safe pure nothrow
-    @property const(Set!(const(ModuleInfo*))) moduleSet() const {
-        return _moduleSet;
-    }
-
-    /**
-     * Returns: The set of modules currently held in the object as an
-     * InputRange, in some undefined order.
-     */
-    @nogc @system pure nothrow
-    @property auto modules() const {
-        return _moduleSet.byKey;
-    }
-
-    /**
-     * Add a module to the object. The module will be marked as a leaf if it
-     * has not already been added.
-     *
-     * Params:
-     *     mod = The module.
-     */
-    @trusted pure nothrow
-    void addModule(const(ModuleInfo*) mod) {
-        if (!_moduleSet.contains(mod)) {
-            _moduleSet.add(mod);
-            _leafSet.add(mod);
-        }
-    }
-
-    /**
-     * Add a module with all of its dependencies, recursively walking through
-     * dependent modules until all modules are discovered.
-     *
-     * The module will not be considered a leaf node, even if it has already
-     * been added, nor will its dependencies.
-     *
-     * Params:
-     *     mod = The module.
-     */
-    @trusted pure nothrow
-    void addModuleWithDependencies(const(ModuleInfo*) mod) {
-        _moduleSet.add(mod);
-        _leafSet.remove(mod);
-
-        // Add the imported module.
-        foreach(importedModule; mod.importedModules) {
-            if (!hasModule(importedModule)) {
-                addModuleWithDependencies(importedModule);
-            }
-        }
-    }
-
-    /**
-     * Add a module with all of its direct dependencies, just the modules
-     * a module has imported.
-     *
-     * The module will not be considered a leaf node, however its dependencies
-     * will be, unless they are added through some other means.
-     *
-     * Params:
-     *     mod = The module.
-     */
-    @trusted pure nothrow
-    void addModuleWithDirectDepdencies(const(ModuleInfo*) mod) {
-        _moduleSet.add(mod);
-        _leafSet.remove(mod);
-
-        foreach(importedModule; mod.importedModules) {
-            if (!hasModule(importedModule)) {
-                addModule(importedModule);
-            }
-        }
-    }
-
-    /**
-     * Add every module available to this object, from all of the modules
-     * which can be seen through imports.
-     */
-    @trusted
-    void addAbsolutelyEverything() {
-        foreach(mod; ModuleInfo) {
-            addModuleWithDependencies(mod);
-        }
-    }
-}
-
-/**
- * Create a copy of the module dependency info object without module names
- * matching the given regular expression.
+ * Add a module to the graph.
+ *
+ * This will simply call addVertex.
  *
  * Params:
- *     dependencyInfo = The module dependency information to copy.
- *     re = A regular expression for filtering out module names.
- *
- * Returns: A copy of the dependency information without the matches.
+ *     graph = The graph.
+ *     mod = The module.
  */
-@trusted
-ModuleDependencyInfo filterOut
-(ref ModuleDependencyInfo dependencyInfo, Regex!char re) {
-    return typeof(return)(
-        dependencyInfo
-        .modules
-        .filter!(x => !x.name.match(re))
-        .toSet
-    );
+@trusted pure nothrow
+void addModule(ref ModuleGraph graph, const(ModuleInfo*) mod) {
+    graph.addVertex(mod);
 }
 
-/// ditto
-@safe
-ModuleDependencyInfo filterOut
-(ModuleDependencyInfo dependencyInfo, Regex!char re) {
-    return dependencyInfo.filterOut(re);
+/**
+ * The dependency strategy to use for adding module dependencies.
+ */
+enum Dependencies: ubyte {
+    /// Add all dependencies (edges), recursively. This is the default option.
+    all,
+    /// Add only direct depdencies (edges), with no recursion.
+    direct
+}
+
+/**
+ * Add a module with all of its dependencies, recursively walking through
+ * dependent modules until all modules are discovered.
+ *
+ * If a module dependency has already been added, the recursion for
+ * module dependencies will stop there. This is to prevent infinite recursion.
+ *
+ * Params:
+ *     graph = The graph.
+ *     mod = The module.
+ */
+@trusted pure nothrow
+void addModuleWithDependencies(Dependencies strategy = Dependencies.all)
+(ref ModuleGraph graph, const(ModuleInfo*) mod) {
+    graph.addVertex(mod);
+
+    // Add the imported module.
+    foreach(importedModule; mod.importedModules) {
+        static if (strategy == Dependencies.all) {
+            if (!graph.hasEdge(mod, importedModule)) {
+                graph.addEdge(mod, importedModule);
+
+                // Add recursive dependencies.
+                graph.addModuleWithDependencies(importedModule);
+            }
+        } else {
+            graph.addEdge(mod, importedModule);
+        }
+    }
+}
+
+/**
+ * Add every module available to this object, from all of the modules
+ * which can be seen through imports.
+ *
+ * Params:
+ *     graph = The graph to add everything to.
+ */
+@trusted
+void addAbsolutelyEverything(ref ModuleGraph graph) {
+    foreach(mod; ModuleInfo) {
+        graph.addModuleWithDependencies(mod);
+    }
+}
+
+/**
+ * Create a copy of the dependency graph without names matching the
+ * given regular expression.
+ *
+ * Params:
+ *     graph = The graph to copy.
+ *     re = A regular expression for filtering out symbol names.
+ *
+ * Returns: A copy of the graph without the matches.
+ */
+@trusted
+GraphType filterOut(GraphType)(const(GraphType) graph, Regex!char re)
+if(is(GraphType == ClassGraph) || is(GraphType == ModuleGraph)) {
+    GraphType newGraph;
+
+    foreach(edge; graph.edges) {
+        if (!edge.from.name.match(re) && !edge.to.name.match(re)) {
+            newGraph.addEdge(edge.from, edge.to);
+        }
+    }
+
+    return newGraph;
 }
 
 /**
@@ -508,35 +339,14 @@ ModuleDependencyInfo filterOut
  * a DOT file.
  *
  * Params:
- *     dependencyInfo = The module dependency information.
+ *     graph = The module dependency graph.
  *     range = The output range.
  */
-void writeDOT(R)(auto ref ModuleDependencyInfo depInfo, R range) {
-    import std.typecons;
-
-    // We have to collect the edges we written in a set and make sure we
-    // don't write them twice, as importedModules can contain a module several
-    // times over.
-    Set!(Tuple!(const(ModuleInfo)*, immutable(ModuleInfo)*)) writtenEdgeSet;
-
+void writeDOT(R)(const(ModuleGraph) graph, R range) {
     void writeModuleName(const(ModuleInfo*) mod) {
         range.put('"');
         mod.name.copy(range);
         range.put('"');
-    }
-
-    void writeEdges(const(ModuleInfo*) mod) {
-        foreach(importedModule; mod.importedModules) {
-             if (depInfo.hasModule(importedModule)
-             && !writtenEdgeSet.contains(tuple(mod, importedModule))) {
-                writeModuleName(mod);
-                " -> ".copy(range);
-                writeModuleName(importedModule);
-                ";\n".copy(range);
-
-                writtenEdgeSet.add(tuple(mod, importedModule));
-             }
-        }
     }
 
     // Open the graph file.
@@ -549,15 +359,16 @@ void writeDOT(R)(auto ref ModuleDependencyInfo depInfo, R range) {
     "\nnode[color=black];\n\n".copy(range);
     "//Module nodes.\n".copy(range);
 
-    foreach(mod; depInfo.modules) {
+    foreach(mod; graph.vertices) {
         writeModuleName(mod);
         ";\n".copy(range);
     }
 
-    foreach(mod; depInfo.modules) {
-        if (depInfo.hasDependentModule(mod)) {
-            writeEdges(mod);
-        }
+    foreach(edge; graph.edges) {
+        writeModuleName(edge.from);
+        " -> ".copy(range);
+        writeModuleName(edge.to);
+        ";\n".copy(range);
     }
 
     range.put('}');
@@ -569,67 +380,18 @@ void writeDOT(R)(auto ref ModuleDependencyInfo depInfo, R range) {
  * imported, and the lines will be drawn orthongonally.
  *
  * Params:
- *     dependencyInfo = The module dependency information.
+ *     graph = The module dependency graph.
  *     range = The output range.
  */
-void writeRankedDOT(R)(auto ref ModuleDependencyInfo depInfo, R range) {
+void writeRankedDOT(R)(const(ModuleGraph) graph, R range) {
+    import std.array;
     import std.typecons;
     import std.conv: to;
-
-    // We have to collect the edges we written in a set and make sure we
-    // don't write them twice, as importedModules can contain a module several
-    // times over.
-    Set!(Tuple!(const(ModuleInfo)*, immutable(ModuleInfo)*)) writtenEdgeSet;
-    // We need to track counted edges separately.
-    Set!(Tuple!(const(ModuleInfo)*, immutable(ModuleInfo)*)) countedEdgeSet;
-    // We need to keep a record of the incoming edge counts.
-    size_t[const(ModuleInfo)*] incomingEdgeCountMap;
 
     void writeModuleName(const(ModuleInfo*) mod) {
         range.put('"');
         mod.name.copy(range);
         range.put('"');
-    }
-
-    // In order for the ranking to work, we have to write the numbers first
-    // before the regular edges. So counting and writing edges has to be two
-    // isolated procedures.
-    void countEdges(const(ModuleInfo*) mod) {
-        if (mod !in incomingEdgeCountMap) {
-            // Set the incoming edge count for outgoing edges to 0 at first,
-            // so we can rank modules which aren't imported anywhere too.
-            incomingEdgeCountMap[mod] = 0;
-        }
-
-        foreach(importedModule; mod.importedModules) {
-             if (depInfo.hasModule(importedModule)
-             && !countedEdgeSet.contains(tuple(mod, importedModule))) {
-                countedEdgeSet.add(tuple(mod, importedModule));
-
-                // Increment or set the incoming edge count.
-                auto countPtr = importedModule in incomingEdgeCountMap;
-
-                if (countPtr) {
-                    *countPtr = *countPtr + 1;
-                } else {
-                    incomingEdgeCountMap[importedModule] = 1;
-                }
-             }
-        }
-    }
-
-    void writeEdges(const(ModuleInfo*) mod) {
-        foreach(importedModule; mod.importedModules) {
-             if (depInfo.hasModule(importedModule)
-             && !writtenEdgeSet.contains(tuple(mod, importedModule))) {
-                writeModuleName(mod);
-                " -> ".copy(range);
-                writeModuleName(importedModule);
-                ";\n".copy(range);
-
-                writtenEdgeSet.add(tuple(mod, importedModule));
-             }
-        }
     }
 
     // Open the graph file.
@@ -639,31 +401,26 @@ void writeRankedDOT(R)(auto ref ModuleDependencyInfo depInfo, R range) {
 
     range.put('\n');
 
-    // count the incoming edges and so on.
-    foreach(mod; depInfo.modules) {
-        countEdges(mod);
+    // Count up the incoming edges for a module.
+    HashMap!(const(ModuleInfo)*, size_t) incomingEdgeCountMap;
+
+    foreach(edge; graph.edges) {
+        incomingEdgeCountMap.setDefault(edge.to) += 1;
     }
 
-    // Now let's reverse the mapping to count -> module_list.
-    const(ModuleInfo*)[][size_t] countToVertexMap;
+    // Invert the map: count => [module, ...]
+    HashMap!(size_t, const(ModuleInfo)*[])  countToVertexMap;
 
-    foreach(mod, count; incomingEdgeCountMap) {
-        auto arrayPtr = count in countToVertexMap;
-
-        if (arrayPtr) {
-            *arrayPtr ~= mod;
-        } else {
-            countToVertexMap[count] = [mod];
-        }
+    foreach(item; incomingEdgeCountMap.byKeyValue) {
+        countToVertexMap.setDefault(item.value) ~= item.key;
     }
 
-    // Now we can write the counts out as edges by themself.
-    // This will trick Graphviz into drawing things in ranks.
     bool firstCount = true;
 
     "node[shape=none]".copy(range);
 
-    foreach(count; countToVertexMap.keys.sort) {
+    // Now write the ranks, in order, in their own subgraph.
+    foreach(count; countToVertexMap.byKey.array.sort) {
         if (!firstCount) {
             "->".copy(range);
         }
@@ -676,13 +433,13 @@ void writeRankedDOT(R)(auto ref ModuleDependencyInfo depInfo, R range) {
     "[arrowhead=none];\n".copy(range);
 
     // Now we'll write {rank=same 1; foo; bar;} to set the node rankings.
-    foreach(count, modList; countToVertexMap) {
+    foreach(item; countToVertexMap.byKeyValue) {
         "{rank=same ".copy(range);
 
-        count.to!string.copy(range);
+        item.key.to!string.copy(range);
         "; ".copy(range);
 
-        foreach(mod; modList) {
+        foreach(mod; item.value) {
             writeModuleName(mod);
             "; ".copy(range);
         }
@@ -693,16 +450,17 @@ void writeRankedDOT(R)(auto ref ModuleDependencyInfo depInfo, R range) {
     // Now we can write our actual nodes and edges out for the proper graph.
     "//Module nodes.\n".copy(range);
 
-    foreach(mod; depInfo.modules) {
+    foreach(mod; graph.vertices) {
         writeModuleName(mod);
         "[shape=box, color=black]".copy(range);
         ";\n".copy(range);
     }
 
-    foreach(mod; depInfo.modules) {
-        if (depInfo.hasDependentModule(mod)) {
-            writeEdges(mod);
-        }
+    foreach(edge; graph.edges) {
+        writeModuleName(edge.from);
+        " -> ".copy(range);
+        writeModuleName(edge.to);
+        ";\n".copy(range);
     }
 
     range.put('}');
