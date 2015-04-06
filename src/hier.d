@@ -5,8 +5,8 @@ import std.algorithm;
 import std.regex: Regex, match;
 import std.typecons: Unqual;
 
-import dstruct.graph;
 import dstruct.map;
+public import dstruct.graph;
 
 /**
  * Params:
@@ -404,8 +404,13 @@ void writeRankedDOT(R)(const(ModuleGraph) graph, R range) {
     // Count up the incoming edges for a module.
     HashMap!(const(ModuleInfo)*, size_t) incomingEdgeCountMap;
 
+    foreach(mod; graph.vertices) {
+        // Initialise the count for everything to 0.
+        incomingEdgeCountMap[mod] = 0;
+    }
+
     foreach(edge; graph.edges) {
-        incomingEdgeCountMap.setDefault(edge.to) += 1;
+        incomingEdgeCountMap[edge.to] += 1;
     }
 
     // Invert the map: count => [module, ...]
